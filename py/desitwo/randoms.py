@@ -17,6 +17,9 @@ from time import time
 from desitarget.randoms import randoms_in_a_brick_from_edges, bricklookup, get_dust
 from desitarget.skyfibers import get_brick_info
 
+# ADM the parallelization script.
+from desitarget.internal import sharedmem
+
 # ADM set up the DESI default logger.
 from desiutil.log import get_logger
 log = get_logger()
@@ -224,16 +227,17 @@ def get_quantities_in_a_brick(ramin, ramax, decmin, decmax, brickname, direc,
                                                direc, aprad=aprad)
 
     # ADM the dtype of the structured array to output.
-    dt = [('BRICKID', '>i4'), ('BRICKNAME', 'U8'),
-          ('OBJID', '>i4'), ('RA', '>f8'), ('DEC', 'f8'), ('EBV', 'f4')]
-    # ADM add columns for quantities based on random look-ups in bricks
-    # ADM ensuring we don't repeat an already assigned column.
-    used, _ = zip(*dt)
-    dtnames = [k.upper() for k in qdict.keys() if k.upper() not in used]
-    dttypes = [qdict[k].dtype.str for k in qdict.keys() if k.upper not in used]
-    dt += zip(dtnames, dttypes)
-
-    # ADM the structured array to output.
+    dt = [('BRICKID', '>i4'), ('BRICKNAME', 'U8'), ('OBJID', '>i4'),
+          ('RA', '>f8'), ('DEC', 'f8'), ('EBV', 'f4'), ('MASKBITS', '<i4'),
+          ('NOBS_N419', '<i2'), ('PSFDEPTH_N419', '<f4'), ('GALDEPTH_N419', '<f4'),
+          ('PSFSIZE_N419', '<f4'), ('APFLUX_N419', '<f8'), ('APFLUX_IVAR_N419', '<f8')]
+    # ADM add other bands, if present, corresponding to a different ODIN field.
+    if np.any(['N501' in k or 'N673' in k for k in qdict.keys()]):
+        dt += [('NOBS_N501', '<i2'), ('PSFDEPTH_N501', '<f4'), ('GALDEPTH_N501', '<f4'),
+               ('PSFSIZE_N501', '<f4'), ('APFLUX_N501', '<f8'), ('APFLUX_IVAR_N501', '<f8'),
+               ('NOBS_N673', '<i2'), ('PSFDEPTH_N673', '<f4'), ('GALDEPTH_N673', '<f4'),
+               ('PSFSIZE_N673', '<f4'), ('APFLUX_N673', '<f8'), ('APFLUX_IVAR_N673', '<f8')]
+    # ADM the full structured array to output.
     qinfo = np.zeros(len(ras), dtype=dt)
 
     # ADM retrieve the E(B-V) values for each random point.
@@ -296,8 +300,8 @@ def select_randoms_bricks(brickdict, bricknames, direc, density=100000,
         :func:`~desitwo.randoms.get_quantities_in_a_brick()`.
     """
     nbricks = len(bricknames)
-    log.info(f"Run {nbricks} bricks from {direc} at density {density:.1e} "
-             f"per sq. deg...t = {time()-start:.1f}s")
+    log.info(f"Running {nbricks} bricks from {direc} at density {density:.1e} "
+             f"per sq. deg on {numproc} processors...t = {time()-start:.1f}s")
 
     # ADM the critical function to run on every brick.
     def _get_quantities(brickname):
