@@ -1,0 +1,90 @@
+#!/usr/bin/env python
+import os
+import sys
+import multiprocessing
+import fitsio
+import numpy as np
+from time import time
+from glob import iglob
+from argparse import ArgumentParser
+
+from desitwo.randoms import select_randoms
+from desitarget.io import write_with_units
+from desiutil.log import get_logger
+
+nproc = multiprocessing.cpu_count() // 2
+start = time()
+log = get_logger()
+
+ap = ArgumentParser(description="Generate pixel-level randoms and associated"
+                    " information from Legacy-Surveys-like reductions.")
+ap.add_argument("direc",
+                help="Directory of Legacy-Surveys-like imaging, e.g. "
+                "/global/cfs/cdirs/cosmo/work/users/dstn/ODIN/xmm-N419/ or "
+                "/global/cfs/cdirs/cosmo/work/users/dstn/ODIN/cosmos")
+ap.add_argument("dest",
+                help="Output directory for random catalog. The output file name "
+                "is built from the input directory")
+ap.add_argument("--density", type=int,
+                help="Number of points per sq. deg. at which to Monte Carlo "
+                "the imaging (defaults to 1,000,000)",
+                default="1000000")
+ap.add_argument("--numproc", type=int,
+                help="number of concurrent processes to use [{}]".format(nproc),
+                default=nproc)
+ap.add_argument("--dustdir",
+                help="Directory of SFD dust maps (default of $DUST_DIR+'/maps')",
+                default=None)
+ap.add_argument("--aprad", type=float,
+                help="Radii (arcsec) of aperture in which to derive sky fluxes. "
+                "Defaults to the DESI fiber radius of 0.75 arcsecs.",
+                default=0.75)
+ap.add_argument("--seed", type=int, help="Random seed", default=1)
+
+ns = ap.parse_args()
+
+if not os.path.exists(ns.direc):
+    log.critical('Input directory does not exist: {}'.format(ns.direc))
+    sys.exit(1)
+
+# ADM go looking for a maskbits file to steal the header for the
+# ADM bit names. Try a couple of configurations (pre/post DR8).
+hdr = None
+gen = iglob(os.path.join(ns.direc, "*", "coadd", "*", "*", "*maskbits*"))
+try:
+    fn = next(gen)
+    hdrall = fitsio.read_header(fn, 1)
+except StopIteration:
+    gen = iglob(os.path.join(ns.direc, "coadd", "*", "*", "*maskbits*"))
+    try:
+        fn = next(gen)
+        hdrall = fitsio.read_header(fn, 0)
+    except StopIteration:
+        log.critical(
+                "No coadd directories in {}?!".format(ns.direc))
+        sys.exit(1)
+# ADM retrieve the record dictionary for the entire header.
+rmhdr = vars(hdrall)
+# ADM write only the maskbits-relevant headers to a new header.
+hdr = fitsio.FITSHDR()
+for record in rmhdr['_record_map']:
+    if 'BITNM' in record:
+        hdr[record] = rmhdr['_record_map'][record]
+hdr["SEED"] = ns.seed
+hdr["DENSITY"] = ns.density
+hdr["APRAD"] = ns.aprad
+
+rands = select_randoms(ns.direc, density=ns.density, numproc=ns.numproc,
+                       dustdir=ns.dustdir, aprad=ns.aprad)
+
+# ADM create output filename.
+fnmid = "-".join([d for d in ns.direc.split(os.sep) if len(d) > 0][-2:])
+filename = os.path.join(ns.dest, f"randoms-{fnmid}-{ns.seed}.fits")
+
+# ADM create directory to which to write (if it doesn't exist).
+os.makedirs(os.path.dirname(ns.dest), exist_ok=True)
+
+# ADM write the file.
+log.info(f"Writing {len(rands)} randoms to {filename}...t = {time()-start:.1f}s")
+write_with_units(filename, rands, extname='RANDOMS', header=hdr)
+log.info(f"Done...t = {time()-start:.1f}s")
