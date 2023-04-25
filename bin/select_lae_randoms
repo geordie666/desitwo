@@ -58,7 +58,7 @@ except StopIteration:
     gen = iglob(os.path.join(ns.direc, "coadd", "*", "*", "*maskbits*"))
     try:
         fn = next(gen)
-        hdrall = fitsio.read_header(fn, 0)
+        hdrall = fitsio.read_header(fn, 1)
     except StopIteration:
         log.critical(
                 "No coadd directories in {}?!".format(ns.direc))
@@ -68,14 +68,16 @@ rmhdr = vars(hdrall)
 # ADM write only the maskbits-relevant headers to a new header.
 hdr = fitsio.FITSHDR()
 for record in rmhdr['_record_map']:
-    if 'BITNM' in record:
+    if 'MBIT' in record:
         hdr[record] = rmhdr['_record_map'][record]
 hdr["SEED"] = ns.seed
 hdr["DENSITY"] = ns.density
 hdr["APRAD"] = ns.aprad
 
-rands = select_randoms(ns.direc, density=ns.density, numproc=ns.numproc,
-                       dustdir=ns.dustdir, aprad=ns.aprad)
+rands, Mxfn = select_randoms(ns.direc, density=ns.density, numproc=ns.numproc,
+                             dustdir=ns.dustdir, aprad=ns.aprad)
+
+hdr["BSMASKFN"] = Mxfn
 
 # ADM create output filename.
 fnmid = "-".join([d for d in ns.direc.split(os.sep) if len(d) > 0][-2:])
