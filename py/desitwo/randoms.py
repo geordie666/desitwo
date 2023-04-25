@@ -12,6 +12,9 @@ import photutils
 import numpy as np
 import astropy.io.fits as fits
 from astropy.wcs import WCS
+from astropy.table import Table
+from astropy.coordinates import SkyCoord
+from astropy import units as u
 from time import time
 
 from desitarget.randoms import randoms_in_a_brick_from_edges, bricklookup, get_dust
@@ -26,6 +29,169 @@ log = get_logger()
 
 # ADM start the clock.
 start = time()
+
+
+def is_in_gaia_mask_arjun(ras, decs, clip=True,
+                          fn='/global/homes/a/arjundey/ODIN/bright_stars_for_mask.fits'):
+    """Mask bright stars using Arjun's Gaia mask. Original version.
+
+    Parameters
+    ----------
+    ras : :class:`~numpy.array`
+        Right Ascensions of interest (degrees).
+    decs : :class:`~numpy.array`
+        Declinations of interest (degrees).
+    clip : :class:`bool`
+        If ``True`` then clip the centers of the bright star masks to be
+        limited to the boundary box formed by the input `ras` and `decs`.
+        Arjun originally clipped (perhaps as a speed-up).
+    fn : :class:`str`
+        Filename of bright star mask.
+
+    Returns
+    -------
+    :class:`~numpy.array`
+        An array of Booleans that is ``True`` for locations in the mask
+        and ``False`` for locations outside the mask.
+    :class:`str`
+        Name of the filename used/passed to read the mask.
+
+    Notes
+    -----
+    - This is a close copy of Arjun Dey's code from a notebook at
+      /global/homes/a/arjundey/ODIN/ODIN_COSMOS_N419.ipynb
+    - :func:`is_in_gaia_mask()` should produce identical results, and
+      should be faster.
+    """
+    start = time()
+
+    # Read in the Bright star mask
+    # Bright stars with G < 9 mag from Gaia DR2.
+    br = Table.read(fn, hdu=1)
+
+    # ADM populate needed info in one place.
+    dt = [('ra', '>f8'), ('dec', 'f8'), ('brightstarflag', '<i4')]
+    alldatals = np.zeros(len(ras), dtype=dt)
+    alldatals['ra'] = ras
+    alldatals['dec'] = decs
+
+    # Restrict bright star mask to size of the ODIN catalog and to.
+    if clip:
+        i = ((br['RA'] >= np.min(alldatals['ra']))
+             & (br['RA'] <= np.max(alldatals['ra']))
+             & (br['DEC'] >= np.min(alldatals['dec']))
+             & (br['DEC'] <= np.max(alldatals['dec'])))
+        br = br[i]
+
+    # ADM also clip to appropriate G-magnitude.
+    ii = br['GAIA_PHOT_G_MEAN_MAG'] <= 9.0
+    br = br[ii]
+
+    # Match the ODIN LAE candidates with the bright star catalog.
+    c1 = SkyCoord(ra=alldatals['ra']*u.degree, dec=alldatals['dec']*u.degree)
+    c2 = SkyCoord(ra=br['RA']*u.degree, dec=br['DEC']*u.degree)
+    idx, d2d, d3d = c1.match_to_catalog_sky(c2)
+    max_sep = 1.0*u.arcsec
+    max_sep = 0.07*(6.3/br['GAIA_PHOT_G_MEAN_MAG'])**2
+
+    # ADM I changed this print statement to allow logging.
+    log.info(f'Number of bright stars = {len(br)}...t={time()-start:.1f}s')
+
+    # Flag the sources that fall near bright stars.
+    lenbr = len(br)
+    badtot = 0
+    # For each star in the bright star list flag the catalog sources
+    # which lie within the appropriate radius.
+    for i in range(lenbr):
+        c2 = SkyCoord(ra=br['RA'][i]*u.degree, dec=br['DEC'][i]*u.degree)
+        # matches to the catalog.
+        # Old formula: msep_i = 0.07*(6.3/br['GAIA_PHOT_G_MEAN_MAG'][i])**2
+        # Variable matching criterion based on the number
+        msep_i = 0.07*(6.3/br['GAIA_PHOT_G_MEAN_MAG'][i])**2
+        d2d = c1.separation(c2)
+        ibad_i = d2d < msep_i*u.deg
+        log.info('Mag= %f ; Separation= %f; Number of flagged sources = %i'
+                 % (br['GAIA_PHOT_G_MEAN_MAG'][i], msep_i, len(d2d[ibad_i])))
+        badtot = badtot + len(d2d[ibad_i])
+        if len(d2d[ibad_i]) > 0:
+            alldatals['brightstarflag'][ibad_i] = 1
+
+    ibad = (alldatals['brightstarflag'] > 0)
+    log.info(f"Total number of catalog sources flagged due to proximity "
+             f"to bright stars = {np.sum(ibad)}...t={time()-start:.1f}s")
+
+    return ibad, fn
+
+
+def is_in_gaia_mask(ras, decs, clip=True,
+                    fn='/global/homes/a/arjundey/ODIN/bright_stars_for_mask.fits'):
+    """Mask bright stars using Arjun's Gaia mask. Quick/compact version.
+
+    Parameters
+    ----------
+    ras : :class:`~numpy.array`
+        Right Ascensions of interest (degrees).
+    decs : :class:`~numpy.array`
+        Declinations of interest (degrees).
+    clip : :class:`bool`
+        If ``True`` then clip the centers of the bright star masks to be
+        limited to the boundary box formed by the input `ras` and `decs`.
+        Potentially useful as a speed-up.
+    fn : :class:`str`
+        Filename of bright star mask.
+
+    Returns
+    -------
+    :class:`~numpy.array`
+        An array of Booleans that is ``True`` for locations in the mask
+        and ``False`` for locations outside the mask.
+    :class:`str`
+        Name of the filename used/passed to read the mask.
+
+    Notes
+    -----
+     - :func:`is_in_gaia_mask_arjun()` should produce identical results,
+       but this code should be faster.
+    """
+    start = time()
+
+    # ADM Read in the bright star mask from Arjun's home directory.
+    Mx = Table.read(fn)
+
+    # ADM Limit bright star mask to size of ODIN catalog, if requested.
+    if clip:
+        ii = ((Mx['RA'] >= np.min(ras)) & (Mx['RA'] <= np.max(ras))
+              & (Mx['DEC'] >= np.min(decs)) & (Mx['DEC'] <= np.max(decs)))
+        Mx = Mx[ii]
+    # ADM Also restrict bright star mask to appropriate magnitude limit.
+    ii = Mx['GAIA_PHOT_G_MEAN_MAG'] <= 9.0
+    Mx = Mx[ii]
+
+    log.info(f"Working with {len(Mx)} bright star masks t={time()-start:.1f}s")
+
+    # ADM if there are no masks in the area, exit with zero masking.
+    if len(Mx) == 0:
+        log.info("So no masking is required")
+        inmask = np.zeros(len(ras), dtype="?")
+        return inmask, fn
+
+    # ADM Match the passed locations with the bright star mask.
+    c = SkyCoord(ra=ras*u.degree, dec=decs*u.degree)
+    cMx = SkyCoord(ra=Mx['RA']*u.degree, dec=Mx['DEC']*u.degree)
+    # ADM Organize the sense of the match so each passed location has an
+    # ADM associated closest bright star mask (identified by iiMx)..
+    iiMx, sep, _ = c.match_to_catalog_sky(cMx)
+
+    # ADM The maximum separation for each mask.
+    maxsep = 0.07*(6.3/Mx['GAIA_PHOT_G_MEAN_MAG'])**2
+
+    # ADM A coordinate is in a mask if the separation from the mask is
+    # ADM less than the maximum separation associated with the mask.
+    inmask = sep < maxsep[iiMx]*u.deg
+
+    log.info(f'{np.sum(inmask)} locations masked by stars...t={time()-start:.1f}s')
+
+    return inmask, fn
 
 
 def quantities_at_positions_in_a_brick(ras, decs, brickname, direc,
@@ -227,8 +393,8 @@ def get_quantities_in_a_brick(ramin, ramax, decmin, decmax, brickname, direc,
                                                direc, aprad=aprad)
 
     # ADM the dtype of the structured array to output.
-    dt = [('BRICKID', '>i4'), ('BRICKNAME', 'U8'), ('OBJID', '>i4'),
-          ('RA', '>f8'), ('DEC', 'f8'), ('EBV', 'f4'), ('MASKBITS', '<i4'),
+    dt = [('BRICKID', '>i4'), ('BRICKNAME', 'U8'), ('OBJID', '>i4'), ('RA', '>f8'),
+          ('DEC', 'f8'), ('EBV', 'f4'), ('MASKBITS', '<i4'), ('IN_ARJUN_MASK', '?'),
           ('NOBS_N419', '<i2'), ('PSFDEPTH_N419', '<f4'), ('GALDEPTH_N419', '<f4'),
           ('PSFSIZE_N419', '<f4'), ('APFLUX_N419', '<f8'), ('APFLUX_IVAR_N419', '<f8')]
     # ADM add other bands, if present, corresponding to a different ODIN field.
@@ -387,6 +553,8 @@ def select_randoms(direc,
     :class:`~numpy.ndarray`
         a random catalog with the same columns as returned by
         :func:`~desitwo.randoms.get_quantities_in_a_brick()`
+    :class:`str`
+        Name of the filename used/passed to read the bright star mask.
     """
     # ADM grab brick information for this directory.
     brickdict = get_brick_info(direc)
@@ -402,8 +570,14 @@ def select_randoms(direc,
         brickdict, bricknames, direc, density=density, numproc=numproc,
         dustdir=dustdir, aprad=aprad, seed=seed)
 
+    # ADM retrieve whether the random location was in a bright star mask.
+    # ADM there's no point parallelizing this, it's very fast.
+    inMx, Mxfn = is_in_gaia_mask(randoms["RA"], randoms["DEC"])
+    # ADM add whether the location is in a bright star mask.
+    randoms["IN_ARJUN_MASK"] = inMx
+
     # ADM one last shuffle to randomize across brick boundaries.
     np.random.seed(615+seed)
     np.random.shuffle(randoms)
 
-    return randoms
+    return randoms, Mxfn
