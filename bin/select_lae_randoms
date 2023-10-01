@@ -21,7 +21,7 @@ ap = ArgumentParser(description="Generate pixel-level randoms and associated"
 ap.add_argument("direc",
                 help="Directory of Legacy-Surveys-like imaging, e.g. "
                 "/global/cfs/cdirs/cosmo/work/users/dstn/ODIN/xmm-N419/ or "
-                "/global/cfs/cdirs/cosmo/work/users/dstn/ODIN/cosmos")
+                "/global/cfs/cdirs/cosmo/work/users/dstn/ODIN/2band")
 ap.add_argument("dest",
                 help="Output directory for random catalog. The output file name "
                 "is built from the input directory")
