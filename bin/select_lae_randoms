@@ -39,7 +39,9 @@ ap.add_argument("--aprad", type=float,
                 help="Radii (arcsec) of aperture in which to derive sky fluxes. "
                 "Defaults to the DESI fiber radius of 0.75 arcsecs.",
                 default=0.75)
-ap.add_argument("--seed", type=int, help="Random seed", default=1)
+ap.add_argument("--seed", type=int,
+                help="Random seed. Defaults to 1.",
+                default=1)
 
 ns = ap.parse_args()
 
