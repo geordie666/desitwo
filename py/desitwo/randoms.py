@@ -247,11 +247,17 @@ def quantities_at_positions_in_a_brick(ras, decs, brickname, direc,
     # ADM this will store the instrument name the first time we touch the wcs
     instrum = None
 
+    # ADM Some choices for filter names. Default to ODIN filters...
+    filters = ['N419', 'N501', 'N673']
+    # ADM ...different filters if we're using Suprime-Cam.
+    if "suprime" in direc:
+        filters = ['I-A-L427', 'I-A-L464', 'I-A-L484', 'I-A-L505', 'I-A-L527']
+
     rootdir = os.path.join(direc, 'coadd', brickname[:3], brickname)
     fileform = os.path.join(rootdir, 'legacysurvey-{}-{}-{}.fits.fz')
     # ADM loop through the filters and store the number of observations
     # ADM etc. at the RA and Dec positions of the passed points.
-    for filt in ['N419', 'N501', 'N673']:
+    for filt in filters:
         # ADM the input file labels, and output column names and output
         # ADM formats for each of the quantities of interest.
         qnames = zip(['nexp', 'depth', 'galdepth', 'psfsize', 'image'],
@@ -392,17 +398,23 @@ def get_quantities_in_a_brick(ramin, ramax, decmin, decmax, brickname, direc,
     qdict = quantities_at_positions_in_a_brick(ras, decs, brickname,
                                                direc, aprad=aprad)
 
+    # ADM Some choices for filter names. Default to ODIN filters...
+    filters = ['N419']
+    if np.any(['N501' in k or 'N673' in k for k in qdict.keys()]):
+        filters += ['N501', 'N673']
+    # ADM ...different filters if we're using Suprime-Cam.
+    if "suprime" in direc:
+        filters = ['I-A-L427', 'I-A-L464', 'I-A-L484', 'I-A-L505', 'I-A-L527']
+
     # ADM the dtype of the structured array to output.
     dt = [('BRICKID', '>i4'), ('BRICKNAME', 'U8'), ('OBJID', '>i4'), ('RA', '>f8'),
-          ('DEC', 'f8'), ('EBV', 'f4'), ('MASKBITS', '<i4'), ('IN_ARJUN_MASK', '?'),
-          ('NOBS_N419', '<i2'), ('PSFDEPTH_N419', '<f4'), ('GALDEPTH_N419', '<f4'),
-          ('PSFSIZE_N419', '<f4'), ('APFLUX_N419', '<f8'), ('APFLUX_IVAR_N419', '<f8')]
-    # ADM add other bands, if present, corresponding to a different ODIN field.
-    if np.any(['N501' in k or 'N673' in k for k in qdict.keys()]):
-        dt += [('NOBS_N501', '<i2'), ('PSFDEPTH_N501', '<f4'), ('GALDEPTH_N501', '<f4'),
-               ('PSFSIZE_N501', '<f4'), ('APFLUX_N501', '<f8'), ('APFLUX_IVAR_N501', '<f8'),
-               ('NOBS_N673', '<i2'), ('PSFDEPTH_N673', '<f4'), ('GALDEPTH_N673', '<f4'),
-               ('PSFSIZE_N673', '<f4'), ('APFLUX_N673', '<f8'), ('APFLUX_IVAR_N673', '<f8')]
+          ('DEC', 'f8'), ('EBV', 'f4'), ('MASKBITS', '<i4'), ('IN_ARJUN_MASK', '?')]
+
+    for filt in filters:
+        dt += [(f'NOBS_{filt}', '<i2'), (f'PSFDEPTH_{filt}', '<f4'),
+               (f'GALDEPTH_{filt}', '<f4'), (f'PSFSIZE_{filt}', '<f4'),
+               (f'APFLUX_{filt}', '<f8'), (f'APFLUX_IVAR_{filt}', '<f8')]
+
     # ADM the full structured array to output.
     qinfo = np.zeros(len(ras), dtype=dt)
 
